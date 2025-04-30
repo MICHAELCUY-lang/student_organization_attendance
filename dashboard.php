@@ -26,11 +26,79 @@ $attendancesQuery = "SELECT COUNT(*) as total FROM attendance";
 $attendancesResult = $conn->query($attendancesQuery);
 $totalAttendances = $attendancesResult ? $attendancesResult->fetch_assoc()['total'] : 0;
 
+// Get attendance statistics
+$attendanceStatsQuery = "
+    SELECT 
+        SUM(CASE WHEN status_kehadiran = 'hadir' THEN 1 ELSE 0 END) as present,
+        SUM(CASE WHEN status_kehadiran = 'izin' THEN 1 ELSE 0 END) as excused,
+        SUM(CASE WHEN status_kehadiran = 'alpa' THEN 1 ELSE 0 END) as absent,
+        SUM(CASE WHEN status_kehadiran = 'telat' THEN 1 ELSE 0 END) as late,
+        COUNT(*) as total
+    FROM 
+        attendance
+";
+$attendanceStatsResult = $conn->query($attendanceStatsQuery);
+$attendanceStats = $attendanceStatsResult ? $attendanceStatsResult->fetch_assoc() : [
+    'present' => 0, 'excused' => 0, 'absent' => 0, 'late' => 0, 'total' => 0
+];
+
+// Prepare chart data
+$chartData = json_encode([
+    'present' => (int)$attendanceStats['present'],
+    'excused' => (int)$attendanceStats['excused'],
+    'absent' => (int)$attendanceStats['absent'],
+    'late' => (int)$attendanceStats['late']
+]);
+
+// Get monthly attendance trend
+$trendQuery = "
+    SELECT 
+        DATE_FORMAT(m.tanggal, '%b %Y') as month,
+        COUNT(DISTINCT m.meeting_id) as total_meetings,
+        COUNT(a.attendance_id) as total_attendances,
+        SUM(CASE WHEN a.status_kehadiran IN ('hadir', 'telat') THEN 1 ELSE 0 END) as present_count,
+        ROUND((SUM(CASE WHEN a.status_kehadiran IN ('hadir', 'telat') THEN 1 ELSE 0 END) / COUNT(a.attendance_id)) * 100, 1) as rate
+    FROM 
+        meetings m
+    LEFT JOIN 
+        attendance a ON m.meeting_id = a.meeting_id
+    GROUP BY 
+        month
+    ORDER BY 
+        m.tanggal DESC
+    LIMIT 6
+";
+$trendResult = $conn->query($trendQuery);
+$trendData = [
+    'labels' => [],
+    'values' => []
+];
+
+if ($trendResult && $trendResult->num_rows > 0) {
+    while ($row = $trendResult->fetch_assoc()) {
+        array_unshift($trendData['labels'], $row['month']);
+        array_unshift($trendData['values'], $row['rate'] ? $row['rate'] : 0);
+    }
+}
+$trendDataJson = json_encode($trendData);
+
 // Get recent meetings (last 5)
 $recentMeetingsQuery = "
-    SELECT * 
-    FROM meetings 
-    ORDER BY tanggal DESC, waktu_mulai DESC 
+    SELECT 
+        m.*, 
+        COUNT(a.attendance_id) as attendance_count,
+        SUM(CASE WHEN a.status_kehadiran = 'hadir' THEN 1 ELSE 0 END) as present_count,
+        SUM(CASE WHEN a.status_kehadiran = 'izin' THEN 1 ELSE 0 END) as excused_count,
+        SUM(CASE WHEN a.status_kehadiran = 'alpa' THEN 1 ELSE 0 END) as absent_count,
+        SUM(CASE WHEN a.status_kehadiran = 'telat' THEN 1 ELSE 0 END) as late_count
+    FROM 
+        meetings m
+    LEFT JOIN 
+        attendance a ON m.meeting_id = a.meeting_id
+    GROUP BY 
+        m.meeting_id
+    ORDER BY 
+        m.tanggal DESC, m.waktu_mulai DESC
     LIMIT 5
 ";
 $recentMeetings = $conn->query($recentMeetingsQuery);
@@ -42,9 +110,8 @@ $attendanceByDivisionQuery = "
         d.nama_divisi,
         COUNT(DISTINCT m.member_id) as total_members,
         COUNT(a.attendance_id) as total_records,
-        SUM(CASE WHEN a.status_kehadiran = 'hadir' OR a.status_kehadiran = 'telat' THEN 1 ELSE 0 END) as total_present,
-        SUM(CASE WHEN a.status_kehadiran = 'izin' THEN 1 ELSE 0 END) as total_excused,
-        SUM(CASE WHEN a.status_kehadiran = 'alpa' THEN 1 ELSE 0 END) as total_absent
+        SUM(CASE WHEN a.status_kehadiran IN ('hadir', 'telat') THEN 1 ELSE 0 END) as total_present,
+        ROUND((SUM(CASE WHEN a.status_kehadiran IN ('hadir', 'telat') THEN 1 ELSE 0 END) / COUNT(a.attendance_id)) * 100, 1) as attendance_rate
     FROM 
         divisions d
     LEFT JOIN 
@@ -58,83 +125,159 @@ $attendanceByDivisionQuery = "
 ";
 $attendanceByDivision = $conn->query($attendanceByDivisionQuery);
 
+// Prepare data for division comparison chart
+$divisionData = [
+    'divisions' => [],
+    'rates' => [],
+    'colors' => []
+];
+
+$colorPalette = ['#4361ee', '#4cc9f0', '#06d6a0', '#f9c74f', '#ef476f', '#7209b7', '#3a0ca3', '#f72585'];
+$colorIndex = 0;
+
+if ($attendanceByDivision && $attendanceByDivision->num_rows > 0) {
+    $attendanceByDivision->data_seek(0); // Reset pointer
+    while ($division = $attendanceByDivision->fetch_assoc()) {
+        $divisionData['divisions'][] = $division['nama_divisi'];
+        $divisionData['rates'][] = $division['attendance_rate'] ? $division['attendance_rate'] : 0;
+        $divisionData['colors'][] = $colorPalette[$colorIndex % count($colorPalette)];
+        $colorIndex++;
+    }
+}
+$divisionDataJson = json_encode($divisionData);
+
 // Include header
 include_once 'includes/header.php';
 ?>
 
-<!-- Dashboard Content -->
 <div class="row mb-4">
-    <div class="col-md-12">
-        <h1 class="h3 mb-3">Dashboard</h1>
-        <div class="row">
-            <!-- Total Members Card -->
-            <div class="col-xl-3 col-md-6 mb-4">
-                <div class="card border-left-primary h-100 py-2">
-                    <div class="card-body">
-                        <div class="row no-gutters align-items-center">
-                            <div class="col mr-2">
-                                <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">
-                                    Total Members</div>
-                                <div class="h5 mb-0 font-weight-bold text-gray-800"><?= $totalMembers ?></div>
-                            </div>
-                            <div class="col-auto">
-                                <i class="bi bi-people fa-2x text-gray-300" style="font-size: 2rem;"></i>
-                            </div>
+    <div class="col-12">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1 class="h3 mb-0">Dashboard</h1>
+            <div class="d-flex gap-2">
+                <button class="btn btn-sm btn-outline-secondary" id="refreshDashboard">
+                    <i class="bi bi-arrow-clockwise"></i> Refresh
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Stats Cards -->
+<div class="row mb-4">
+    <!-- Total Members Card -->
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="dashboard-stat-card">
+            <div class="card-body">
+                <h5 class="card-title">TOTAL MEMBERS</h5>
+                <div class="card-value counter-value"><?= $totalMembers ?></div>
+                <p class="card-text text-muted mb-0">Registered organization members</p>
+                <i class="bi bi-people-fill card-icon"></i>
+            </div>
+            <div class="card-accent card-accent-primary"></div>
+        </div>
+    </div>
+
+    <!-- Total Meetings Card -->
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="dashboard-stat-card">
+            <div class="card-body">
+                <h5 class="card-title">TOTAL MEETINGS</h5>
+                <div class="card-value counter-value"><?= $totalMeetings ?></div>
+                <p class="card-text text-muted mb-0">Scheduled organization meetings</p>
+                <i class="bi bi-calendar-event-fill card-icon"></i>
+            </div>
+            <div class="card-accent card-accent-success"></div>
+        </div>
+    </div>
+
+    <!-- Total Divisions Card -->
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="dashboard-stat-card">
+            <div class="card-body">
+                <h5 class="card-title">TOTAL DIVISIONS</h5>
+                <div class="card-value counter-value"><?= $totalDivisions ?></div>
+                <p class="card-text text-muted mb-0">Organization divisions/departments</p>
+                <i class="bi bi-diagram-3-fill card-icon"></i>
+            </div>
+            <div class="card-accent card-accent-info"></div>
+        </div>
+    </div>
+
+    <!-- Total Attendances Card -->
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="dashboard-stat-card">
+            <div class="card-body">
+                <h5 class="card-title">ATTENDANCE RECORDS</h5>
+                <div class="card-value counter-value"><?= $totalAttendances ?></div>
+                <p class="card-text text-muted mb-0">Total attendance entries recorded</p>
+                <i class="bi bi-clipboard-check-fill card-icon"></i>
+            </div>
+            <div class="card-accent card-accent-warning"></div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <!-- Attendance Overview Chart -->
+    <div class="col-xl-4 col-lg-5 mb-4">
+        <div class="card h-100">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="card-title mb-0">Attendance Overview</h5>
+            </div>
+            <div class="card-body">
+                <div class="chart-container" style="position: relative; height: 240px;">
+                    <canvas id="attendanceOverviewChart" data-chart='<?= $chartData ?>'></canvas>
+                </div>
+                
+                <div class="row text-center mt-4">
+                    <div class="col-3">
+                        <div class="attendance-stat">
+                            <h6 class="small text-muted mb-1">Present</h6>
+                            <h5 class="mb-0"><?= $attendanceStats['present'] ?: 0 ?></h5>
+                        </div>
+                    </div>
+                    <div class="col-3">
+                        <div class="attendance-stat">
+                            <h5 class="mb-0"><?= $attendanceStats['late'] ?: 0 ?></h5>
+                        </div>
+                    </div>
+                    <div class="col-3">
+                        <div class="attendance-stat">
+                            <h6 class="small text-muted mb-1">Excused</h6>
+                            <h5 class="mb-0"><?= $attendanceStats['excused'] ?: 0 ?></h5>
+                        </div>
+                    </div>
+                    <div class="col-3">
+                        <div class="attendance-stat">
+                            <h6 class="small text-muted mb-1">Absent</h6>
+                            <h5 class="mb-0"><?= $attendanceStats['absent'] ?: 0 ?></h5>
                         </div>
                     </div>
                 </div>
             </div>
-
-            <!-- Total Meetings Card -->
-            <div class="col-xl-3 col-md-6 mb-4">
-                <div class="card border-left-success h-100 py-2">
-                    <div class="card-body">
-                        <div class="row no-gutters align-items-center">
-                            <div class="col mr-2">
-                                <div class="text-xs font-weight-bold text-success text-uppercase mb-1">
-                                    Total Meetings</div>
-                                <div class="h5 mb-0 font-weight-bold text-gray-800"><?= $totalMeetings ?></div>
-                            </div>
-                            <div class="col-auto">
-                                <i class="bi bi-calendar-event fa-2x text-gray-300" style="font-size: 2rem;"></i>
-                            </div>
-                        </div>
-                    </div>
+        </div>
+    </div>
+    
+    <!-- Attendance Trend Chart -->
+    <div class="col-xl-8 col-lg-7 mb-4">
+        <div class="card h-100">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="card-title mb-0">Attendance Trend</h5>
+                <div class="card-actions">
+                    <button class="btn btn-sm btn-outline-secondary">
+                        <i class="bi bi-calendar3"></i> Monthly
+                    </button>
                 </div>
             </div>
-
-            <!-- Total Divisions Card -->
-            <div class="col-xl-3 col-md-6 mb-4">
-                <div class="card border-left-info h-100 py-2">
-                    <div class="card-body">
-                        <div class="row no-gutters align-items-center">
-                            <div class="col mr-2">
-                                <div class="text-xs font-weight-bold text-info text-uppercase mb-1">
-                                    Total Divisions</div>
-                                <div class="h5 mb-0 font-weight-bold text-gray-800"><?= $totalDivisions ?></div>
-                            </div>
-                            <div class="col-auto">
-                                <i class="bi bi-diagram-3 fa-2x text-gray-300" style="font-size: 2rem;"></i>
-                            </div>
-                        </div>
-                    </div>
+            <div class="card-body">
+                <div class="chart-container" style="position: relative; height: 240px;">
+                    <canvas id="attendanceTrendChart" data-chart='<?= $trendDataJson ?>'></canvas>
                 </div>
-            </div>
-
-            <!-- Total Attendances Card -->
-            <div class="col-xl-3 col-md-6 mb-4">
-                <div class="card border-left-warning h-100 py-2">
-                    <div class="card-body">
-                        <div class="row no-gutters align-items-center">
-                            <div class="col mr-2">
-                                <div class="text-xs font-weight-bold text-warning text-uppercase mb-1">
-                                    Total Attendances</div>
-                                <div class="h5 mb-0 font-weight-bold text-gray-800"><?= $totalAttendances ?></div>
-                            </div>
-                            <div class="col-auto">
-                                <i class="bi bi-calendar-check fa-2x text-gray-300" style="font-size: 2rem;"></i>
-                            </div>
-                        </div>
+                
+                <div class="d-flex justify-content-center align-items-center mt-2">
+                    <div class="text-muted small">
+                        <i class="bi bi-info-circle me-1"></i> Shows average attendance rate over time
                     </div>
                 </div>
             </div>
@@ -144,40 +287,64 @@ include_once 'includes/header.php';
 
 <div class="row">
     <!-- Recent Meetings -->
-    <div class="col-lg-6 mb-4">
-        <div class="card shadow">
-            <div class="card-header py-3 d-flex justify-content-between align-items-center">
-                <h6 class="m-0 font-weight-bold">Recent Meetings</h6>
-                <a href="<?= BASE_URL ?>/modules/meetings/list.php" class="btn btn-sm btn-primary">View All</a>
+    <div class="col-xl-6 mb-4">
+        <div class="card h-100">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="card-title mb-0">Recent Meetings</h5>
+                <a href="<?= BASE_URL ?>/modules/meetings/list.php" class="btn btn-sm btn-primary">
+                    <i class="bi bi-list"></i> View All
+                </a>
             </div>
-            <div class="card-body">
+            <div class="card-body p-0">
                 <div class="table-responsive">
-                    <table class="table table-bordered">
+                    <table class="table table-hover mb-0">
                         <thead>
                             <tr>
-                                <th>Title</th>
+                                <th>Meeting</th>
                                 <th>Date</th>
-                                <th>Time</th>
+                                <th>Attendance</th>
                                 <th>Actions</th>
                             </tr>
                         </thead>
                         <tbody>
                             <?php if ($recentMeetings && $recentMeetings->num_rows > 0): ?>
                                 <?php while ($meeting = $recentMeetings->fetch_assoc()): ?>
+                                    <?php 
+                                    $attendanceRate = $meeting['attendance_count'] > 0 
+                                        ? round(($meeting['present_count'] + $meeting['late_count']) / $meeting['attendance_count'] * 100) 
+                                        : 0;
+                                    ?>
                                     <tr>
-                                        <td><?= $meeting['judul_rapat'] ?></td>
+                                        <td class="fw-medium"><?= $meeting['judul_rapat'] ?></td>
                                         <td><?= formatDate($meeting['tanggal']) ?></td>
-                                        <td><?= formatTime($meeting['waktu_mulai']) ?> - <?= formatTime($meeting['waktu_selesai']) ?></td>
                                         <td>
-                                            <a href="<?= BASE_URL ?>/modules/attendance/list.php?meeting_id=<?= $meeting['meeting_id'] ?>" class="btn btn-sm btn-info">
-                                                <i class="bi bi-eye"></i> Attendance
-                                            </a>
+                                            <div class="d-flex align-items-center">
+                                                <div class="progress flex-grow-1 me-2" style="height: 6px;">
+                                                    <div class="progress-bar bg-success" role="progressbar" 
+                                                        style="width: <?= $attendanceRate ?>%" 
+                                                        aria-valuenow="<?= $attendanceRate ?>" 
+                                                        aria-valuemin="0" aria-valuemax="100"></div>
+                                                </div>
+                                                <span class="text-muted small"><?= $attendanceRate ?>%</span>
+                                            </div>
+                                        </td>
+                                        <td>
+                                            <div class="d-flex">
+                                                <a href="<?= BASE_URL ?>/modules/attendance/list.php?meeting_id=<?= $meeting['meeting_id'] ?>" 
+                                                   class="btn btn-sm btn-outline-info me-1" data-bs-toggle="tooltip" title="View Attendance">
+                                                    <i class="bi bi-eye"></i>
+                                                </a>
+                                                <a href="<?= BASE_URL ?>/modules/attendance/add.php?meeting_id=<?= $meeting['meeting_id'] ?>"
+                                                   class="btn btn-sm btn-outline-success" data-bs-toggle="tooltip" title="Record Attendance">
+                                                    <i class="bi bi-plus-circle"></i>
+                                                </a>
+                                            </div>
                                         </td>
                                     </tr>
                                 <?php endwhile; ?>
                             <?php else: ?>
                                 <tr>
-                                    <td colspan="4" class="text-center">No meetings found</td>
+                                    <td colspan="4" class="text-center py-4">No meetings found</td>
                                 </tr>
                             <?php endif; ?>
                         </tbody>
@@ -188,53 +355,53 @@ include_once 'includes/header.php';
     </div>
 
     <!-- Attendance by Division -->
-    <div class="col-lg-6 mb-4">
-        <div class="card shadow">
-            <div class="card-header py-3 d-flex justify-content-between align-items-center">
-                <h6 class="m-0 font-weight-bold">Attendance by Division</h6>
-                <a href="<?= BASE_URL ?>/modules/attendance/report.php" class="btn btn-sm btn-primary">Full Report</a>
+    <div class="col-xl-6 mb-4">
+        <div class="card h-100">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="card-title mb-0">Attendance by Division</h5>
+                <a href="<?= BASE_URL ?>/modules/attendance/report.php" class="btn btn-sm btn-primary">
+                    <i class="bi bi-file-earmark-text"></i> Full Report
+                </a>
             </div>
             <div class="card-body">
+                <div class="chart-container mb-3" style="position: relative; height: 200px;">
+                    <canvas id="divisionComparisonChart" data-chart='<?= $divisionDataJson ?>'></canvas>
+                </div>
                 <div class="table-responsive">
-                    <table class="table table-bordered">
+                    <table class="table table-sm table-borderless mb-0">
                         <thead>
-                            <tr>
+                            <tr class="text-muted small">
                                 <th>Division</th>
                                 <th>Members</th>
-                                <th>Present</th>
-                                <th>Excused</th>
-                                <th>Absent</th>
                                 <th>Rate</th>
                             </tr>
                         </thead>
                         <tbody>
                             <?php if ($attendanceByDivision && $attendanceByDivision->num_rows > 0): ?>
-                                <?php while ($division = $attendanceByDivision->fetch_assoc()): ?>
+                                <?php 
+                                $attendanceByDivision->data_seek(0); // Reset pointer
+                                while ($division = $attendanceByDivision->fetch_assoc()): 
+                                ?>
                                     <tr>
-                                        <td><?= $division['nama_divisi'] ?></td>
+                                        <td class="fw-medium"><?= $division['nama_divisi'] ?></td>
                                         <td><?= $division['total_members'] ?></td>
-                                        <td><?= $division['total_present'] ?? 0 ?></td>
-                                        <td><?= $division['total_excused'] ?? 0 ?></td>
-                                        <td><?= $division['total_absent'] ?? 0 ?></td>
                                         <td>
-                                            <?php
-                                            $attendanceRate = 0;
-                                            if ($division['total_records'] > 0) {
-                                                $attendanceRate = ($division['total_present'] / $division['total_records']) * 100;
-                                            }
-                                            ?>
-                                            <div class="progress">
-                                                <div class="progress-bar bg-success" role="progressbar" style="width: <?= round($attendanceRate) ?>%" 
-                                                    aria-valuenow="<?= round($attendanceRate) ?>" aria-valuemin="0" aria-valuemax="100">
-                                                    <?= round($attendanceRate) ?>%
+                                            <div class="d-flex align-items-center">
+                                                <div class="progress flex-grow-1 me-2" style="height: a6px;">
+                                                    <div class="progress-bar <?= $division['attendance_rate'] >= 75 ? 'bg-success' : ($division['attendance_rate'] >= 50 ? 'bg-warning' : 'bg-danger') ?>" 
+                                                        role="progressbar" 
+                                                        style="width: <?= $division['attendance_rate'] ?>%" 
+                                                        aria-valuenow="<?= $division['attendance_rate'] ?>" 
+                                                        aria-valuemin="0" aria-valuemax="100"></div>
                                                 </div>
+                                                <span class="text-muted small"><?= $division['attendance_rate'] ?>%</span>
                                             </div>
                                         </td>
                                     </tr>
                                 <?php endwhile; ?>
                             <?php else: ?>
                                 <tr>
-                                    <td colspan="6" class="text-center">No data found</td>
+                                    <td colspan="3" class="text-center">No data available</td>
                                 </tr>
                             <?php endif; ?>
                         </tbody>
@@ -245,33 +412,45 @@ include_once 'includes/header.php';
     </div>
 </div>
 
-<!-- Quick Links -->
-<div class="row">
-    <div class="col-lg-12 mb-4">
-        <div class="card shadow">
-            <div class="card-header py-3">
-                <h6 class="m-0 font-weight-bold">Quick Actions</h6>
+<!-- Quick Actions -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="card-title mb-0">Quick Actions</h5>
             </div>
             <div class="card-body">
-                <div class="row">
-                    <div class="col-md-3 mb-3">
-                        <a href="<?= BASE_URL ?>/modules/attendance/add.php" class="btn btn-primary btn-block py-3">
-                            <i class="bi bi-plus-circle"></i> Record Attendance
+                <div class="row g-3">
+                    <div class="col-lg-3 col-md-6">
+                        <a href="<?= BASE_URL ?>/modules/attendance/add.php" class="btn btn-primary d-flex align-items-center justify-content-center p-3 w-100 h-100">
+                            <div class="text-center">
+                                <i class="bi bi-clipboard-plus d-block mb-2" style="font-size: 1.75rem;"></i>
+                                <span>Record Attendance</span>
+                            </div>
                         </a>
                     </div>
-                    <div class="col-md-3 mb-3">
-                        <a href="<?= BASE_URL ?>/modules/members/add.php" class="btn btn-success btn-block py-3">
-                            <i class="bi bi-person-plus"></i> Add New Member
+                    <div class="col-lg-3 col-md-6">
+                        <a href="<?= BASE_URL ?>/modules/members/add.php" class="btn btn-success d-flex align-items-center justify-content-center p-3 w-100 h-100">
+                            <div class="text-center">
+                                <i class="bi bi-person-plus d-block mb-2" style="font-size: 1.75rem;"></i>
+                                <span>Add New Member</span>
+                            </div>
                         </a>
                     </div>
-                    <div class="col-md-3 mb-3">
-                        <a href="<?= BASE_URL ?>/modules/meetings/add.php" class="btn btn-info btn-block py-3">
-                            <i class="bi bi-calendar-plus"></i> Schedule Meeting
+                    <div class="col-lg-3 col-md-6">
+                        <a href="<?= BASE_URL ?>/modules/meetings/add.php" class="btn btn-info d-flex align-items-center justify-content-center p-3 w-100 h-100">
+                            <div class="text-center">
+                                <i class="bi bi-calendar-plus d-block mb-2" style="font-size: 1.75rem;"></i>
+                                <span>Schedule Meeting</span>
+                            </div>
                         </a>
                     </div>
-                    <div class="col-md-3 mb-3">
-                        <a href="<?= BASE_URL ?>/modules/documents/upload.php" class="btn btn-warning btn-block py-3">
-                            <i class="bi bi-file-earmark-plus"></i> Upload Document
+                    <div class="col-lg-3 col-md-6">
+                        <a href="<?= BASE_URL ?>/modules/documents/upload.php" class="btn btn-warning d-flex align-items-center justify-content-center p-3 w-100 h-100">
+                            <div class="text-center">
+                                <i class="bi bi-file-earmark-arrow-up d-block mb-2" style="font-size: 1.75rem;"></i>
+                                <span>Upload Document</span>
+                            </div>
                         </a>
                     </div>
                 </div>
@@ -279,5 +458,12 @@ include_once 'includes/header.php';
         </div>
     </div>
 </div>
+
+<script>
+    // Refresh dashboard on button click
+    document.getElementById('refreshDashboard').addEventListener('click', function() {
+        location.reload();
+    });
+</script>
 
 <?php include_once 'includes/footer.php'; ?>
