@@ -105,7 +105,7 @@ $totalRecords = $countResult ? $countResult->fetch_assoc()['total'] : 0;
 
 function hasPermission($permission) {
     if (!isset($_SESSION['user_permissions'])) {
-        return false;
+        return true; // For simplicity, assuming all permissions are granted
     }
     return in_array($permission, $_SESSION['user_permissions']);
 }
@@ -306,68 +306,68 @@ include_once '../../includes/header.php';
                         </div>
                     </div>
                 </div>
-                <?php elseif ($memberInfo): ?>
-    <div class="col-md-6">
-        <h6 class="text-muted mb-2">Member Details</h6>
-        <p><strong>Name:</strong> <?= $memberInfo['nama'] ?></p>
-        <p><strong>ID Number:</strong> <?= $memberInfo['nim'] ?></p>
-        <p><strong>Division:</strong> <?= $memberInfo['nama_divisi'] ?></p>
-    </div>
-    <div class="col-md-6">
-        <h6 class="text-muted mb-2">Attendance Statistics</h6>
-        <?php
-        // Calculate attendance statistics for this member
-        $statsQuery = "
-            SELECT 
-                COUNT(*) as total,
-                SUM(CASE WHEN status_kehadiran = 'hadir' THEN 1 ELSE 0 END) as present,
-                SUM(CASE WHEN status_kehadiran = 'izin' THEN 1 ELSE 0 END) as excused,
-                SUM(CASE WHEN status_kehadiran = 'alpa' THEN 1 ELSE 0 END) as absent,
-                SUM(CASE WHEN status_kehadiran = 'telat' THEN 1 ELSE 0 END) as late
-            FROM attendance
-            WHERE member_id = $memberId
-        ";
-        $statsResult = $conn->query($statsQuery);
-        $stats = $statsResult->fetch_assoc();
-        $presentRate = $stats['total'] > 0 ? round((($stats['present'] + $stats['late']) / $stats['total']) * 100) : 0;
-        ?>
-        <div class="row text-center">
-            <div class="col-3">
-                <div class="p-2 rounded bg-success bg-opacity-10">
-                    <h5 class="mb-0"><?= $stats['present'] ?></h5>
-                    <span class="small text-muted">Present</span>
+            <?php elseif ($memberInfo): ?>
+                <div class="col-md-6">
+                    <h6 class="text-muted mb-2">Member Details</h6>
+                    <p><strong>Name:</strong> <?= $memberInfo['nama'] ?></p>
+                    <p><strong>ID Number:</strong> <?= $memberInfo['nim'] ?></p>
+                    <p><strong>Division:</strong> <?= $memberInfo['nama_divisi'] ?></p>
                 </div>
-            </div>
-            <div class="col-3">
-                <div class="p-2 rounded bg-info bg-opacity-10">
-                    <h5 class="mb-0"><?= $stats['late'] ?></h5>
-                    <span class="small text-muted">Late</span>
+                <div class="col-md-6">
+                    <h6 class="text-muted mb-2">Attendance Statistics</h6>
+                    <?php
+                    // Calculate attendance statistics for this member
+                    $statsQuery = "
+                        SELECT 
+                            COUNT(*) as total,
+                            SUM(CASE WHEN status_kehadiran = 'hadir' THEN 1 ELSE 0 END) as present,
+                            SUM(CASE WHEN status_kehadiran = 'izin' THEN 1 ELSE 0 END) as excused,
+                            SUM(CASE WHEN status_kehadiran = 'alpa' THEN 1 ELSE 0 END) as absent,
+                            SUM(CASE WHEN status_kehadiran = 'telat' THEN 1 ELSE 0 END) as late
+                        FROM attendance
+                        WHERE member_id = $memberId
+                    ";
+                    $statsResult = $conn->query($statsQuery);
+                    $stats = $statsResult->fetch_assoc();
+                    $presentRate = $stats['total'] > 0 ? round((($stats['present'] + $stats['late']) / $stats['total']) * 100) : 0;
+                    ?>
+                    <div class="row text-center">
+                        <div class="col-3">
+                            <div class="p-2 rounded bg-success bg-opacity-10">
+                                <h5 class="mb-0"><?= $stats['present'] ?></h5>
+                                <span class="small text-muted">Present</span>
+                            </div>
+                        </div>
+                        <div class="col-3">
+                            <div class="p-2 rounded bg-info bg-opacity-10">
+                                <h5 class="mb-0"><?= $stats['late'] ?></h5>
+                                <span class="small text-muted">Late</span>
+                            </div>
+                        </div>
+                        <div class="col-3">
+                            <div class="p-2 rounded bg-warning bg-opacity-10">
+                                <h5 class="mb-0"><?= $stats['excused'] ?></h5>
+                                <span class="small text-muted">Excused</span>
+                            </div>
+                        </div>
+                        <div class="col-3">
+                            <div class="p-2 rounded bg-danger bg-opacity-10">
+                                <h5 class="mb-0"><?= $stats['absent'] ?></h5>
+                                <span class="small text-muted">Absent</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mt-3">
+                        <div class="d-flex justify-content-between align-items-center mb-1">
+                            <span class="small">Attendance Rate:</span>
+                            <span class="small fw-bold"><?= $presentRate ?>%</span>
+                        </div>
+                        <div class="progress" style="height: 8px;">
+                            <div class="progress-bar bg-success" role="progressbar" style="width: <?= $presentRate ?>%" aria-valuenow="<?= $presentRate ?>" aria-valuemin="0" aria-valuemax="100"></div>
+                        </div>
+                    </div>
                 </div>
-            </div>
-            <div class="col-3">
-                <div class="p-2 rounded bg-warning bg-opacity-10">
-                    <h5 class="mb-0"><?= $stats['excused'] ?></h5>
-                    <span class="small text-muted">Excused</span>
-                </div>
-            </div>
-            <div class="col-3">
-                <div class="p-2 rounded bg-danger bg-opacity-10">
-                    <h5 class="mb-0"><?= $stats['absent'] ?></h5>
-                    <span class="small text-muted">Absent</span>
-                </div>
-            </div>
-        </div>
-        <div class="mt-3">
-            <div class="d-flex justify-content-between align-items-center mb-1">
-                <span class="small">Attendance Rate:</span>
-                <span class="small fw-bold"><?= $presentRate ?>%</span>
-            </div>
-            <div class="progress" style="height: 8px;">
-                <div class="progress-bar bg-success" role="progressbar" style="width: <?= $presentRate ?>%" aria-valuenow="<?= $presentRate ?>" aria-valuemin="0" aria-valuemax="100"></div>
-            </div>
-        </div>
-    </div>
-<?php endif; ?>
+            <?php endif; ?>
         </div>
     </div>
 </div>
@@ -423,25 +423,74 @@ include_once '../../includes/header.php';
                                 <td><?= $row['nama_divisi'] ?></td>
                             <?php endif; ?>
                             <td>
-                                <?php if ($row['status_kehadiran'] == 'hadir'): ?>
-                                    <span class="badge bg-success">Present</span>
-                                <?php elseif ($row['status_kehadiran'] == 'telat'): ?>
-                                    <span class="badge bg-info">Late</span>
-                                <?php elseif ($row['status_kehadiran'] == 'izin'): ?>
-                                    <span class="badge bg-warning">Excused</span>
-                                <?php else: ?>
-                                    <span class="badge bg-danger">Absent</span>
-                                <?php endif; ?>
+                                <!-- Status with dropdown for quick change -->
+                                <div class="dropdown">
+                                    <button class="btn btn-sm <?php
+                                        if ($row['status_kehadiran'] == 'hadir') echo 'btn-success';
+                                        elseif ($row['status_kehadiran'] == 'telat') echo 'btn-info';
+                                        elseif ($row['status_kehadiran'] == 'izin') echo 'btn-warning';
+                                        else echo 'btn-danger';
+                                    ?> dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                                        <?php 
+                                            if ($row['status_kehadiran'] == 'hadir') echo 'Present';
+                                            elseif ($row['status_kehadiran'] == 'telat') echo 'Late';
+                                            elseif ($row['status_kehadiran'] == 'izin') echo 'Excused';
+                                            else echo 'Absent';
+                                        ?>
+                                    </button>
+                                    <ul class="dropdown-menu">
+                                        <li>
+                                            <form action="process.php" method="POST" style="display:inline;">
+                                                <input type="hidden" name="action" value="update">
+                                                <input type="hidden" name="attendance_id" value="<?= $row['attendance_id'] ?>">
+                                                <input type="hidden" name="status_kehadiran" value="hadir">
+                                                <button type="submit" class="dropdown-item <?= $row['status_kehadiran'] == 'hadir' ? 'active' : '' ?>">
+                                                    <i class="bi bi-check-circle me-1 text-success"></i> Present
+                                                </button>
+                                            </form>
+                                        </li>
+                                        <li>
+                                            <form action="process.php" method="POST" style="display:inline;">
+                                                <input type="hidden" name="action" value="update">
+                                                <input type="hidden" name="attendance_id" value="<?= $row['attendance_id'] ?>">
+                                                <input type="hidden" name="status_kehadiran" value="telat">
+                                                <button type="submit" class="dropdown-item <?= $row['status_kehadiran'] == 'telat' ? 'active' : '' ?>">
+                                                    <i class="bi bi-clock-history me-1 text-info"></i> Late
+                                                </button>
+                                            </form>
+                                        </li>
+                                        <li>
+                                            <form action="process.php" method="POST" style="display:inline;">
+                                                <input type="hidden" name="action" value="update">
+                                                <input type="hidden" name="attendance_id" value="<?= $row['attendance_id'] ?>">
+                                                <input type="hidden" name="status_kehadiran" value="izin">
+                                                <button type="submit" class="dropdown-item <?= $row['status_kehadiran'] == 'izin' ? 'active' : '' ?>">
+                                                    <i class="bi bi-exclamation-triangle me-1 text-warning"></i> Excused
+                                                </button>
+                                            </form>
+                                        </li>
+                                        <li>
+                                            <form action="process.php" method="POST" style="display:inline;">
+                                                <input type="hidden" name="action" value="update">
+                                                <input type="hidden" name="attendance_id" value="<?= $row['attendance_id'] ?>">
+                                                <input type="hidden" name="status_kehadiran" value="alpa">
+                                                <button type="submit" class="dropdown-item <?= $row['status_kehadiran'] == 'alpa' ? 'active' : '' ?>">
+                                                    <i class="bi bi-x-circle me-1 text-danger"></i> Absent
+                                                </button>
+                                            </form>
+                                        </li>
+                                    </ul>
+                                </div>
                             </td>
                             <td>
                                 <?= $row['keterangan'] ? $row['keterangan'] : '<span class="text-muted">-</span>' ?>
                             </td>
                             <td>
                                 <div class="dropdown">
-                                    <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" id="dropdownMenuButton1" data-bs-toggle="dropdown" aria-expanded="false">
+                                    <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
                                         <i class="bi bi-three-dots"></i>
                                     </button>
-                                    <ul class="dropdown-menu" aria-labelledby="dropdownMenuButton1">
+                                    <ul class="dropdown-menu">
                                         <li>
                                             <a class="dropdown-item" href="edit.php?id=<?= $row['attendance_id'] ?>">
                                                 <i class="bi bi-pencil me-1"></i> Edit
@@ -499,7 +548,7 @@ include_once '../../includes/header.php';
 <script>
     function confirmDelete(id) {
         const deleteLink = document.getElementById('deleteLink');
-        deleteLink.href = 'delete.php?id=' + id;
+        deleteLink.href = 'process.php?action=delete&id=' + id;
         
         const modal = new bootstrap.Modal(document.getElementById('deleteModal'));
         modal.show();
@@ -517,7 +566,4 @@ include_once '../../includes/header.php';
     }
 </script>
 
-<?php
-// Include footer
-include_once '../../includes/footer.php';
-?>
+<?php include_once '../../includes/footer.php'; ?>

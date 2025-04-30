@@ -22,7 +22,6 @@ $currentPage = basename($_SERVER['PHP_SELF']);
     <aside class="sidebar">
         <div class="sidebar-brand">
             <img src="<?= BASE_URL ?>/assets/images/logo.png" alt="Logo">
-            <span>SOAS</span>
         </div>
         
         <ul class="sidebar-menu">
