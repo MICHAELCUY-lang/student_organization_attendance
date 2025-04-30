@@ -1,3 +1,67 @@
+<?php
+// dashboard.php
+require_once 'config/config.php';
+require_once 'includes/auth.php';
+
+// Set page title
+$pageTitle = 'Dashboard';
+
+// Get total members
+$membersQuery = "SELECT COUNT(*) as total FROM members";
+$membersResult = $conn->query($membersQuery);
+$totalMembers = $membersResult ? $membersResult->fetch_assoc()['total'] : 0;
+
+// Get total meetings
+$meetingsQuery = "SELECT COUNT(*) as total FROM meetings";
+$meetingsResult = $conn->query($meetingsQuery);
+$totalMeetings = $meetingsResult ? $meetingsResult->fetch_assoc()['total'] : 0;
+
+// Get total divisions
+$divisionsQuery = "SELECT COUNT(*) as total FROM divisions";
+$divisionsResult = $conn->query($divisionsQuery);
+$totalDivisions = $divisionsResult ? $divisionsResult->fetch_assoc()['total'] : 0;
+
+// Get total attendances
+$attendancesQuery = "SELECT COUNT(*) as total FROM attendance";
+$attendancesResult = $conn->query($attendancesQuery);
+$totalAttendances = $attendancesResult ? $attendancesResult->fetch_assoc()['total'] : 0;
+
+// Get recent meetings (last 5)
+$recentMeetingsQuery = "
+    SELECT * 
+    FROM meetings 
+    ORDER BY tanggal DESC, waktu_mulai DESC 
+    LIMIT 5
+";
+$recentMeetings = $conn->query($recentMeetingsQuery);
+
+// Get attendance by division
+$attendanceByDivisionQuery = "
+    SELECT 
+        d.division_id,
+        d.nama_divisi,
+        COUNT(DISTINCT m.member_id) as total_members,
+        COUNT(a.attendance_id) as total_records,
+        SUM(CASE WHEN a.status_kehadiran = 'hadir' OR a.status_kehadiran = 'telat' THEN 1 ELSE 0 END) as total_present,
+        SUM(CASE WHEN a.status_kehadiran = 'izin' THEN 1 ELSE 0 END) as total_excused,
+        SUM(CASE WHEN a.status_kehadiran = 'alpa' THEN 1 ELSE 0 END) as total_absent
+    FROM 
+        divisions d
+    LEFT JOIN 
+        members m ON d.division_id = m.division_id
+    LEFT JOIN 
+        attendance a ON m.member_id = a.member_id
+    GROUP BY 
+        d.division_id
+    ORDER BY 
+        d.nama_divisi ASC
+";
+$attendanceByDivision = $conn->query($attendanceByDivisionQuery);
+
+// Include header
+include_once 'includes/header.php';
+?>
+
 <!-- Dashboard Content -->
 <div class="row mb-4">
     <div class="col-md-12">
@@ -149,9 +213,9 @@
                                     <tr>
                                         <td><?= $division['nama_divisi'] ?></td>
                                         <td><?= $division['total_members'] ?></td>
-                                        <td><?= $division['total_present'] ?></td>
-                                        <td><?= $division['total_excused'] ?></td>
-                                        <td><?= $division['total_absent'] ?></td>
+                                        <td><?= $division['total_present'] ?? 0 ?></td>
+                                        <td><?= $division['total_excused'] ?? 0 ?></td>
+                                        <td><?= $division['total_absent'] ?? 0 ?></td>
                                         <td>
                                             <?php
                                             $attendanceRate = 0;
